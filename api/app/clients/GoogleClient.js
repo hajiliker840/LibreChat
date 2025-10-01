@@ -32,6 +32,10 @@ const {
 } = require('./prompts');
 const BaseClient = require('./BaseClient');
 
+// **شروع تغییرات: تعریف شمارنده سراسری برای چرخش کلید**
+let keyIndex = 0;
+// **پایان تغییرات**
+
 const loc = process.env.GOOGLE_LOC || 'us-central1';
 const publisher = 'google';
 const endpointPrefix =
@@ -60,7 +64,9 @@ class GoogleClient extends BaseClient {
     this.private_key = this.serviceKey.private_key;
     this.access_token = null;
 
-    this.apiKey = creds[AuthKeys.GOOGLE_API_KEY];
+    // **تغییر: فقط رشته کامل کلیدها را برای استفاده بعدی ذخیره می‌کنیم.**
+    this.apiKeysString = creds[AuthKeys.GOOGLE_API_KEY];
+    // **پایان تغییر**
 
     this.reverseProxyUrl = options.reverseProxyUrl;
 
@@ -588,6 +594,21 @@ class GoogleClient extends BaseClient {
   }
 
   createLLM(clientOptions) {
+    // **شروع تغییرات نهایی: منطق چرخش کلید در اینجا اعمال می‌شود**
+    if (!this.apiKeysString) {
+      throw new Error('متغیر GOOGLE_KEY در constructor خوانده نشده است.');
+    }
+    const apiKeys = this.apiKeysString.split(',').map(key => key.trim());
+
+    if (keyIndex === 0 && apiKeys.length > 1) {
+      logger.info(`[GoogleClient] تعداد ${apiKeys.length} کلید جمینای شناسایی شد. سیستم چرخش کلید فعال است.`);
+    }
+
+    const currentApiKey = apiKeys[keyIndex];
+    logger.info(`[GoogleClient] درخواست فعلی از کلید شماره ${keyIndex + 1} از ${apiKeys.length} استفاده می‌کند.`);
+    keyIndex = (keyIndex + 1) % apiKeys.length;
+    // **پایان تغییرات نهایی**
+
     const model = clientOptions.modelName ?? clientOptions.model;
     clientOptions.location = loc;
     clientOptions.endpoint = endpointPrefix;
@@ -600,7 +621,7 @@ class GoogleClient extends BaseClient {
 
       if (this.authHeader) {
         requestOptions.customHeaders = {
-          Authorization: `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${currentApiKey}`, // **تغییر: استفاده از کلید چرخشی**
         };
       }
     }
@@ -620,11 +641,13 @@ class GoogleClient extends BaseClient {
       return client;
     } else if (!EXCLUDED_GENAI_MODELS.test(model)) {
       logger.debug('Creating GenAI client');
-      return new GenAI(this.apiKey).getGenerativeModel({ model }, requestOptions);
+      // **تغییر: استفاده از کلید چرخشی**
+      return new GenAI(currentApiKey).getGenerativeModel({ model }, requestOptions);
     }
 
     logger.debug('Creating Chat Google Generative AI client');
-    return new ChatGoogleGenerativeAI({ ...clientOptions, apiKey: this.apiKey });
+    // **تغییر: استفاده از کلید چرخشی**
+    return new ChatGoogleGenerativeAI({ ...clientOptions, apiKey: currentApiKey });
   }
 
   initializeClient() {
